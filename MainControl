@@ -1,0 +1,170 @@
+#include <MaxMatrix.h>
+#include <NewPing.h>
+#include <deprecated.h>
+#include <MFRC522.h>
+#include <MFRC522Extended.h>
+#include <require_cpp11.h>
+#include <SPI.h>     
+#include <Servo.h>         
+
+#define TRIG_PIN     7          // trigger Pin
+#define ECHO_PIN     6          // Echo Pin
+#define RST_PIN      A0  
+#define SS_PIN       10  
+#define SERVO_PIN    9   
+#define MAX_DISTANCE 200
+int DIN = 3;   // DIN pin of MAX7219 module
+int CLK = 5;   // CLK pin of MAX7219 module
+int CS = 4;    // CS pin of MAX7219 module
+int maxInUse = 1;
+int car = 10;
+bool lockerSwitch = false;  // 伺服馬達的狀態
+bool dis = false;
+Servo servo;    
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
+MaxMatrix m(DIN, CS, CLK, maxInUse);
+
+char A10[] = {8, 8,
+            B10000001,
+            B11111111,
+            B10000000,
+            B00000000,
+            B11111111,
+            B10000001,
+            B10000001,
+            B11111111,
+           };
+
+char A9[] = {8, 8,
+            B00000000,
+            B00000000,
+            B10011111,
+            B10010001,
+            B10010001,
+            B10010001,
+            B11111111,
+            B00000000,
+           };
+
+char A8[] = {8, 8,
+            B00000000,
+            B11111111,
+            B10010001,
+            B10010001,
+            B10010001,
+            B10010001,
+            B11111111,
+            B00000000,
+           };
+
+struct RFIDTag {   // 定義結構
+   byte uid[4];
+   char *name;
+};
+
+struct RFIDTag tags[] = {     //會員卡資料
+  {{83,82,180,12}, "Member1"},
+  {{212,211,192,97}, "Member2"},
+  {{21,8,10,83}, "Member3"}
+};
+
+byte totalTags = sizeof(tags) / sizeof(RFIDTag);  
+
+float x = 0;    //調慢閘門速度
+
+void locker(bool toggle) {  // 開鎖或關鎖
+  if (toggle) {
+    for(x=85; x<=180; x++) {
+      servo.write(x);
+      delay(100);
+    }
+  delay(15);    
+ }
+}
+
+void carvoid() {
+  while (true) {
+  delay(50);
+  int uS = sonar.ping();
+  Serial.print("Ping: ");
+  Serial.println(uS);
+  Serial.print(uS / US_ROUNDTRIP_CM);
+  Serial.println("cm");
+  if (uS > 300){
+    for(x=180; x>=85; x--) {
+    servo.write(x);
+    delay(100);
+    } break;
+  }
+ }
+}
+
+void carslot(){
+  switch(car) {
+    case 9:
+      m.writeSprite(0, 0, A9);
+      delay(1000);
+      break;
+    case 8:
+      m.writeSprite(0, 0, A8);
+      delay(1000);
+      break;
+  }
+ 
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println();
+  Serial.print("size of RFIDTag:");
+  Serial.println(sizeof(RFIDTag));
+  Serial.print("size of tag:");
+  Serial.println(sizeof(tags));
+  Serial.println("RFID reader is ready!");
+
+  SPI.begin();
+  mfrc522.PCD_Init();       
+  servo.attach(SERVO_PIN);  
+  locker(lockerSwitch);
+  m.init(); // MAX7219 initialization
+  m.setIntensity(5); // initial led matrix intensity, 0-15
+  m.writeSprite(0, 0, A10);
+}
+
+void loop() {
+        
+    // 確認是否有新卡片
+    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+      byte *id = mfrc522.uid.uidByte;   // 取得卡片的UID
+      byte idSize = mfrc522.uid.size;   // 取得UID的長度
+      bool foundTag = false;    // 是否找到紀錄中的標籤，預設為「否」。
+      
+      for (byte i=0; i<totalTags; i++) {
+        if (memcmp(tags[i].uid, id, idSize) == 0) {  // 比對陣列資料值
+          Serial.println(tags[i].name);  // 顯示標籤的名稱
+          foundTag = true;  
+          
+          lockerSwitch = true;  //正確的標籤，開鎖
+          locker(lockerSwitch);
+          carvoid();
+          car--;
+          carslot();          
+          break;  // 退出for迴圈
+
+        }
+      }
+
+      if (!foundTag) {  // 若掃描到紀錄之外的標籤，則顯示"Wrong card!"。
+        Serial.println("Wrong card!");
+
+        // 如果鎖是開啟狀態，則關閉它。
+        if (lockerSwitch) {
+          lockerSwitch = false;
+          locker(lockerSwitch);
+        }
+      }
+      
+      mfrc522.PICC_HaltA();  // 讓卡片進入停止模式      
+    }
+}
