@@ -1,4 +1,4 @@
-# ParkingGateSimulator drive by Auduino Uno 
+# ParkingLotGateSimulator drive by Auduino Uno 
 ---
 Require item :
 RFID-RC522
